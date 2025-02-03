@@ -2,23 +2,24 @@
 using System.IO.Pipes;
 using System.IO;
 using System.Text;
+using System.Text.RegularExpressions;
 
-class ClienteMadLibs
+class ServidorMadLibs
 {
     static void Main(string[] args)
     {
         string pipeName = "MadLibsPipe";
 
-        // Crear el pipe para conectarse al servidor
-        using (NamedPipeClientStream pipeClient = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut))
+        // Crear el pipe del servidor
+        using (NamedPipeServerStream pipeServer = new NamedPipeServerStream(pipeName, PipeDirection.InOut))
         {
-            Console.WriteLine("Conectándose al servidor...");
-            pipeClient.Connect();
-            Console.WriteLine("Conexión establecida con el servidor.");
+            Console.WriteLine("Esperando conexión con el cliente...");
+            pipeServer.WaitForConnection();
+            Console.WriteLine("Cliente conectado.");
 
             // Crear lector y escritor para el pipe
-            using (StreamReader reader = new StreamReader(pipeClient, Encoding.UTF8))
-            using (StreamWriter writer = new StreamWriter(pipeClient, Encoding.UTF8))
+            using (StreamReader reader = new StreamReader(pipeServer, Encoding.UTF8))
+            using (StreamWriter writer = new StreamWriter(pipeServer, Encoding.UTF8))
             {
                 writer.AutoFlush = true; // Asegurar que los datos se envíen de inmediato
 
@@ -26,41 +27,50 @@ class ClienteMadLibs
                 {
                     try
                     {
-                        // Pedir al usuario el nombre del cuento
-                        Console.Write("Escribe el nombre del cuento (ejemplo: cuento2): ");
-                        string? nombreCuento = Console.ReadLine();
+                        // Leer el nombre del cuento desde el cliente
+                        string? nombreCuento = reader.ReadLine();
                         if (string.IsNullOrWhiteSpace(nombreCuento))
                         {
-                            Console.WriteLine("El nombre del cuento no puede ser vacío. Intenta nuevamente.");
-                            continue; // Repite el bucle para pedir un nombre válido
+                            Console.WriteLine("El cliente envió un nombre de cuento vacío o nulo.");
+                            writer.WriteLine("ERROR: El nombre del cuento no es válido.");
+                            continue; // Repite el bucle principal
                         }
-                        writer.WriteLine(nombreCuento);
 
-                        // Leer mensajes del servidor (solicitudes de palabras o errores)
-                        string? mensaje;
-                        while ((mensaje = reader.ReadLine()) != null)
+                        // Leer el archivo del cuento
+                        string filePath = $"{nombreCuento}.txt";
+                        if (!File.Exists(filePath))
                         {
-                            if (mensaje.StartsWith("Rellena este hueco"))
-                            {
-                                Console.WriteLine(mensaje);
-                                string? palabra = Console.ReadLine();
-                                palabra ??= ""; // Si es null, reemplaza con cadena vacía
-                                writer.WriteLine(palabra);
-                            }
-                            else
-                            {
-                                Console.WriteLine(mensaje);
-                                break;
-                            }
+                            writer.WriteLine("ERROR: El archivo del cuento no existe.");
+                            continue;
                         }
+
+                        string cuento = File.ReadAllText(filePath);
+                        Console.WriteLine("Archivo del cuento leído correctamente.");
+
+                        // Detectar las etiquetas en el cuento
+                        Regex regex = new Regex("<(.*?)>");
+                        MatchCollection matches = regex.Matches(cuento);
+
+                        foreach (Match match in matches)
+                        {
+                            string etiqueta = match.Value; // Ejemplo: <sustantivo-masculino>
+                            writer.WriteLine($"Rellena este hueco ({etiqueta}):");
+                            string? palabra = reader.ReadLine();
+                            palabra ??= ""; // Si es null, reemplaza con cadena vacía
+                            cuento = cuento.Replace(etiqueta, palabra);
+                        }
+
                     }
                     catch (Exception ex)
                     {
                         Console.WriteLine($"Error: {ex.Message}");
+                        writer.WriteLine("ERROR: Ocurrió un problema en el servidor.");
                     }
                 }
             }
         }
     }
 }
+
+
 
